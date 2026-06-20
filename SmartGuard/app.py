@@ -3,7 +3,8 @@ SmartGuard Enterprise Dashboard  v5.0
 AI-Powered Cybersecurity Threat Detection & User Behaviour Analytics
 
 Run with:
-    pip install streamlit plotly pandas scikit-learn joblib xgboost --break-system-packages
+    python -m venv venv && source venv/bin/activate   # (Windows: venv\\Scripts\\activate)
+    pip install -r requirements.txt
     streamlit run app.py
 """
 
@@ -65,7 +66,8 @@ def load_models():
         hybrid = joblib.load(_p("hybrid_model.pkl"))
         iso    = joblib.load(_p("isolation_forest_model.pkl"))
         return rf, xgb, hybrid, iso
-    except Exception:
+    except Exception as e:
+        st.warning(f"⚠ Model load failed — running rule-based fallback. ({e})")
         return None, None, None, None
 
 RF_MODEL, XGB_MODEL, HYBRID_MODEL, ISO_MODEL = load_models()
@@ -84,24 +86,11 @@ USERS_DB = {
         "role":        "Chief Security Officer",
         "department":  "Cybersecurity Operations",
         "location":    "Qatar HQ",
-        "clearance":   " TOP SECRET",
+        "clearance":   "TOP SECRET",
         "email":       "aalia.albalushi@smartguard.qa",
         "phone":       "+974 5000 1234",
         "joined":      "Jan 2025",
         "avatar_color": "#4fd1c5",
-    },
-    "admin": {
-        "password":    _hash("admin123"),
-        "full_name":   "System Administrator",
-        "initials":    "SA",
-        "role":        "Platform Administrator",
-        "department":  "IT Infrastructure",
-        "location":    "Qatar HQ",
-        "clearance":   "TOP SECRET",
-        "email":       "admin@smartguard.qa",
-        "phone":       "+974 5000 0001",
-        "joined":      "Sep 2026",
-        "avatar_color": "#b794f4",
     },
 }
 
@@ -1073,6 +1062,15 @@ def render_dashboard():
                         atk_conf = max(atk_conf, _fusion_conf)
                     atk_conf = min(atk_conf, 98)
 
+                    # Per-class distribution for the breakdown bars.
+                    # Guarantee it is normalized AND that the predicted class is
+                    # its dominant component, so the bars can never contradict the
+                    # final verdict (e.g. a "Normal" verdict with a 100% DoS bar).
+                    atk_proba = _ctx_norm.copy()
+                    _others_max = max([atk_proba[i] for i in range(5) if i != atk_pred], default=0.0)
+                    atk_proba[atk_pred] = max(atk_proba[atk_pred], atk_conf / 100, _others_max + 0.05)
+                    atk_proba = atk_proba / atk_proba.sum()
+
                     confidence  = int(max(hybrid_prob, 1 - hybrid_prob) * 100)
                     # Boost reported confidence when all layers agree
                     if (hybrid_prob > 0.6 and iso_is_anomaly
@@ -1380,20 +1378,16 @@ def render_dashboard():
                     """, unsafe_allow_html=True)
 
                     if atk_pred == 1:  # DoS
-                       st.warning("⚡ RECOMMENDATION: Enable rate limiting and traffic filtering.")
-
+                        st.warning("⚡ RECOMMENDATION: Enable rate limiting and traffic filtering.")
                     elif atk_pred == 2:  # Probe
                         st.warning("⚡ RECOMMENDATION: Investigate reconnaissance activity and monitor scanned assets.")
-
                     elif atk_pred == 3:  # R2L
                         st.warning("⚡ RECOMMENDATION: Review authentication logs and consider account lockout.")
-
                     elif atk_pred == 4:  # U2R
                         st.warning("⚡ RECOMMENDATION: Investigate privilege escalation and isolate affected systems.")
-
                     elif score > 65:
-                         st.warning("⚡ RECOMMENDATION: Immediate investigation required.")
- 
+                        st.warning("⚡ RECOMMENDATION: Immediate investigation required.")
+
         with col_chart:
             days = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
             fig_b = go.Figure()
